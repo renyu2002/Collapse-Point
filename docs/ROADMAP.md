@@ -16,9 +16,10 @@
 ## Phase 1 — 核心奇点
 
 - [ ] 实现 `ISuckable`、`APhysicsObject`
-- [ ] 实现 `USingularityAttractComponent` + `ASingularity`（质量、时限、崩塌冲量）
-- [ ] 实现 `ACollapsePointCharacter`：瞄准 Trace、RMB 按住/松开、甩动采样、LMB 轻推
-- [ ] 白模房间 + 若干物理方块，验证：创造 → 吸入 → 爆发
+- [ ] 实现 `USingularityAttractComponent` + `ASingularity`（质量、时限、**准星拖动**、崩塌冲量）
+- [ ] 实现 `ACollapsePointCharacter`：瞄准 Trace、RMB 按住/松开、甩动加力、冷却、LMB 自身弹跳
+- [ ] 玩家轻吸引 + 贴脸风险（最小可玩版本）
+- [ ] 白模房间 + 若干物理方块，验证：创造 → 拖动吸入 → 朝准星爆发
 
 **里程碑**：无敌人时，用方块砸墙已经「手痒」。
 
