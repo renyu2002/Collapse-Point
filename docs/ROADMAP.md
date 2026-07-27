@@ -8,18 +8,18 @@
 
 ## Phase 0 — 工程脚手架
 
-- [ ] 新建 UE5 第三人称 **C++** 项目（建议名 `CollapsePoint`）
-- [ ] 删除射击武器、弹匣、准星射击相关代码与输入
-- [ ] 保留移动、跳跃、相机；接入 Enhanced Input
-- [ ] 确认启动 Map 为空白试验腔（或临时空关卡）
+- [x] 新建 UE5 第三人称 **C++** 项目（建议名 `CollapsePoint`）
+- [x] 删除射击武器、弹匣、准星射击相关代码与输入（模板无枪械，沿用移动跳跃）
+- [x] 保留移动、跳跃、相机；接入 Enhanced Input
+- [x] 确认启动 Map 为空白试验腔（或临时空关卡）→ 现用 `Lvl_ThirdPerson` 验证
 
 ## Phase 1 — 核心奇点
 
-- [ ] 实现 `ISuckable`、`APhysicsObject`
-- [ ] 实现 `USingularityAttractComponent` + `ASingularity`（质量、时限、**准星拖动**、崩塌冲量）
-- [ ] 实现 `ACollapsePointCharacter`：瞄准 Trace、RMB 按住/松开、甩动加力、冷却、LMB 自身弹跳
-- [ ] 玩家轻吸引 + 贴脸风险（最小可玩版本）
-- [ ] 白模房间 + 若干物理方块，验证：创造 → 拖动吸入 → 朝准星爆发
+- [x] 实现 `ISuckable`、`APhysicsObject`
+- [x] 实现 `USingularityAttractComponent` + `ASingularity`（质量、时限、**准星拖动**、崩塌冲量）
+- [x] 实现 `ACollapsePointCharacter`：瞄准 Trace、RMB 按住/松开、甩动加力、冷却、LMB 自身弹跳
+- [x] 玩家轻吸引 + 贴脸风险（最小可玩版本）
+- [x] 白模房间 + 若干物理方块，验证：创造 → 拖动吸入 → 朝准星爆发（关卡已放 8 个方块；请人工 PIE 手感确认）
 
 **里程碑**：无敌人时，用方块砸墙已经「手痒」。
 

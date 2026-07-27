@@ -1,0 +1,51 @@
+# Unreal Engine
+**/Binaries/
+**/DerivedDataCache/
+**/Intermediate/
+**/Saved/
+**/Build/
+**/FileOpenOrder/
+**/*.VC.db
+**/*.opensdf
+**/*.sdf
+**/*.sln.docstates
+**/*.suo
+**/*.xcodeproj
+**/*.xcworkspace
+
+# Visual Studio / Rider / VS Code
+.vs/
+.idea/
+*.user
+*.userosscache
+*.sln.docstates
+*.VC.db
+*.opendb
+*.db
+*.ipch
+
+# Compiled / local
+*.pdb
+*.ilk
+*.exp
+*.obj
+*.o
+*.dll
+*.exe
+*.lib
+*.a
+*.so
+*.dylib
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Cursor / local tooling
+.cursor/
+
+# Keep source & content; ignore locally generated plugin binaries if any
+**/Plugins/**/Binaries/
+**/Plugins/**/Intermediate/

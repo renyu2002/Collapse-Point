@@ -4,7 +4,12 @@
 
 ## 当前状态
 
-**设计已冻结 · 工程未建。** 本仓库目前仅包含玩法与技术规格文档，无 Unreal 工程与蓝图资产。
+**Phase 1 实施中。** 工程位于 [`Game/`](Game/)，已启用官方 `ModelContextProtocol` / `EditorToolset` / `LiveCodingToolset`。
+
+已落地（源码）：`ISuckable`、`APhysicsObject`、`USingularityAttractComponent`、`ASingularity`、`ACollapsePointCharacter`。  
+已落地（资产）：`IA_Singularity`、`IA_Nudge`，并写入 `IMC_Default`（RMB / LMB）。
+
+下一步：关闭编辑器后完整编译，再将 `BP_ThirdPersonCharacter` 父类改为 `CollapsePointCharacter`，并在关卡放置物理方块验证。
 
 实现原则：**以 C++ 为准，蓝图最小化**——玩法逻辑、输入、物理与过关条件写在 C++；蓝图仅用于关卡摆放与表现资产引用。详见 [技术规格](docs/TECH_SPEC.md)。
 
