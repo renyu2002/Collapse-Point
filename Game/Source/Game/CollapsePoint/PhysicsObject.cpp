@@ -1,6 +1,7 @@
 // Collapse Point — APhysicsObject
 
 #include "CollapsePoint/PhysicsObject.h"
+#include "CollapsePoint/CollapsePointImpact.h"
 #include "Components/StaticMeshComponent.h"
 #include "UObject/ConstructorHelpers.h"
 
@@ -27,6 +28,24 @@ void APhysicsObject::BeginPlay()
 {
 	Super::BeginPlay();
 	SpawnTransform = GetActorTransform();
+	if (Mesh)
+	{
+		Mesh->OnComponentHit.AddDynamic(this, &APhysicsObject::OnMeshHit);
+	}
+}
+
+void APhysicsObject::OnMeshHit(UPrimitiveComponent* HitComp, AActor* OtherActor, UPrimitiveComponent* OtherComp,
+	FVector NormalImpulse, const FHitResult& Hit)
+{
+	if (!OtherActor || OtherActor == this || !Mesh)
+	{
+		return;
+	}
+
+	const float Speed = Mesh->GetPhysicsLinearVelocity().Size();
+	const float Mass = Mesh->GetMass();
+	const float Score = CollapsePointImpact::ComputeImpactScore(Speed, Mass, DamageScale);
+	CollapsePointImpact::TryApplyImpactDamage(this, OtherActor, Score, GetInstigatorController());
 }
 
 void APhysicsObject::ResetToSpawn()

@@ -48,13 +48,13 @@ public:
 	float DragFollowSpeed = 1200.f;
 
 	UPROPERTY(EditAnywhere, Category = "CollapsePoint")
-	float CollapseSpeedBase = 400.f;
+	float CollapseSpeedBase = 650.f;
 
 	UPROPERTY(EditAnywhere, Category = "CollapsePoint")
-	float CollapseSpeedPerMass = 15.f;
+	float CollapseSpeedPerMass = 25.f;
 
 	UPROPERTY(EditAnywhere, Category = "CollapsePoint")
-	float MaxCollapseSpeed = 700.f;
+	float MaxCollapseSpeed = 1100.f;
 
 	UPROPERTY(EditAnywhere, Category = "CollapsePoint")
 	float MaxMassForCollapse = 20.f;

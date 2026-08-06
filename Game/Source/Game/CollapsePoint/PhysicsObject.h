@@ -24,11 +24,17 @@ public:
 	virtual UPrimitiveComponent* GetSuckPrimitive() const override;
 	virtual void OnSuckedTick(const FVector& Force) override;
 
+	float GetDamageScale() const { return DamageScale; }
+
 	/** Snap back to spawn transform and clear velocity. */
 	UFUNCTION(BlueprintCallable, Category = "CollapsePoint")
 	void ResetToSpawn();
 
 protected:
+	UFUNCTION()
+	void OnMeshHit(UPrimitiveComponent* HitComp, AActor* OtherActor, UPrimitiveComponent* OtherComp,
+		FVector NormalImpulse, const FHitResult& Hit);
+
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "CollapsePoint")
 	TObjectPtr<UStaticMeshComponent> Mesh;
 
