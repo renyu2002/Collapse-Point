@@ -21,4 +21,5 @@ public:
 	virtual float GetSuckMass() const = 0;
 	virtual UPrimitiveComponent* GetSuckPrimitive() const = 0;
 	virtual void OnSuckedTick(const FVector& Force) {}
+	virtual bool IsBeingSucked() const { return false; }
 };

@@ -21,7 +21,9 @@ public class Game : ModuleRules
 			"Slate"
 		});
 
-		PrivateDependencyModuleNames.AddRange(new string[] { });
+		PrivateDependencyModuleNames.AddRange(new string[] {
+			"Json"
+		});
 
 		PublicIncludePaths.AddRange(new string[] {
 			"Game",

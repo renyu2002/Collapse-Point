@@ -14,13 +14,17 @@ class ATriggerButton;
 class AExplosiveBarrel;
 class ADualSwitchShield;
 class ACheckpointVolume;
+class ATestChamber;
+class AChamberBlock;
+class UWorld;
+struct FActorSpawnParameters;
 class UInputAction;
 class UInputMappingContext;
 class AHUD;
 
 /**
  * Third-person character with singularity create / drag / collapse controls.
- * Space = jump. LMB hold/release = singularity. R = spawn more physics cubes.
+ * Space = jump. LMB hold/release = gravity well. R = reset current chamber props.
  */
 UCLASS()
 class GAME_API ACollapsePointCharacter : public AGameCharacter
@@ -46,19 +50,33 @@ public:
 
 	void SetCheckpoint(const FTransform& Transform);
 	void RespawnAtCheckpoint();
+	void SetCurrentChamber(ATestChamber* Chamber);
+	void OnWellTimeout();
+	void ResetCurrentChamber();
+
+	/** Test-only control surface used by the unattended playthrough driver. */
+	bool BeginAutomationSingularityAt(const FVector& WorldTarget);
+	void SetAutomationSingularityTarget(const FVector& WorldTarget);
+	void AdjustAutomationOrbitRadius(float InputSteps);
+	void AdjustAutomationOrbitTilt(float InputSteps);
+	void ReleaseAutomationSingularity(const FVector& AimDirection, bool bTangentialSling = false);
+	ASingularity* GetAutomationSingularity() const { return ActiveSingularity; }
 
 protected:
 	void OnSingularityStarted();
 	void OnSingularityReleased();
-	void OnSpawnMorePhysicsObjects();
+	void OnOrbitRadiusInput(float Value);
+	void OnResetPressed();
 	void CachePhysicsSpawnSlots();
-	void SpawnExtraPhysicsObjects();
 	void SpawnLightEnemies();
 	void BuildVerticalSliceLayout();
 	void DieAndRespawn();
 
+	AChamberBlock* SpawnBlock(UWorld* World, const FVector& Loc, const FRotator& Rot, const FVector& Scale, FActorSpawnParameters& Params, FLinearColor Color);
+
 	void SampleFlick(float YawDelta, float PitchDelta);
 	bool CanSpawnSingularity() const;
+	bool IsSingularityPathSuppressed(const FVector& Start, const FVector& End) const;
 	void EnsureCrosshairHUD();
 	void ApplyAimViewCamera();
 	FVector ComputeSingularityLocation() const;
@@ -112,15 +130,16 @@ protected:
 	UPROPERTY(EditAnywhere, Category = "CollapsePoint")
 	float ExtraCubeSpawnJitter = 40.f;
 
+	/** Spawn this many light enemies near cube slots on BeginPlay (0 = none). Chambers spawn none. */
 	UPROPERTY(EditAnywhere, Category = "CollapsePoint")
-	int32 AutoSpawnEnemyCount = 3;
+	int32 AutoSpawnEnemyCount = 0;
 
 	UPROPERTY(EditAnywhere, Category = "CollapsePoint")
 	TSubclassOf<AEnemyPawn> EnemyClass;
 
 	/** Auto-spawn A/B/C demo props once per session if none exist. */
 	UPROPERTY(EditAnywhere, Category = "CollapsePoint")
-	bool bAutoBuildVerticalSlice = true;
+	bool bAutoBuildVerticalSlice = false;
 
 	UPROPERTY(EditAnywhere, Category = "CollapsePoint|Player")
 	float MaxHP = 100.f;
@@ -144,6 +163,12 @@ protected:
 	bool bIsDead = false;
 	float RespawnDelay = 1.2f;
 	float RespawnTimer = 0.f;
+
+	UPROPERTY(Transient)
+	TObjectPtr<ATestChamber> CurrentChamber;
+
+	bool bAutomationAimOverride = false;
+	FVector AutomationAimWorldTarget = FVector::ZeroVector;
 
 	float CooldownRemaining = 0.f;
 	float FlickAccumulator = 0.f;

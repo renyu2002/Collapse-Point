@@ -30,6 +30,7 @@ public:
 	virtual float GetSuckMass() const override;
 	virtual UPrimitiveComponent* GetSuckPrimitive() const override;
 	virtual void OnSuckedTick(const FVector& Force) override;
+	virtual bool IsBeingSucked() const override { return bBeingSucked; }
 
 	float GetImpactThreshold() const { return bHeavyEnemy ? HeavyImpactThreshold : ImpactThreshold; }
 	bool IsAlive() const { return !bDead && CurrentHP > 0.f; }

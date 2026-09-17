@@ -1,6 +1,8 @@
 #include "CollapsePoint/SingularityAttractComponent.h"
 #include "CollapsePoint/Singularity.h"
 #include "CollapsePoint/SuckableInterface.h"
+#include "CollapsePoint/BreakablePanel.h"
+#include "CollapsePoint/CheckpointVolume.h"
 #include "CollapsePoint/CollapsePointLog.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
@@ -33,37 +35,28 @@ float USingularityAttractComponent::GetCurrentRadius() const
 	return FMath::Min(BaseAttractRadius + RadiusPerMass * Mass, MaxCaptureRadius);
 }
 
+bool USingularityAttractComponent::IsActorOrbiting(const AActor* Actor) const
+{
+	return Actor && AttractedActors.Contains(const_cast<AActor*>(Actor));
+}
+
 float USingularityAttractComponent::GetOrAssignOrbitRadius(AActor* Actor)
 {
 	TWeakObjectPtr<AActor> Key(Actor);
 	if (const float* Existing = BodyOrbitRadius.Find(Key))
 	{
-		return *Existing;
+		return FMath::Clamp(TargetOrbitRadius + *Existing, MinOrbitRadius, MaxOrbitRadius);
 	}
 
-	const float Jitter = OrbitRadiusJitter * (static_cast<float>(GetTypeHash(Actor) % 1000) / 1000.f);
-	const float Assigned = OrbitRadius + Jitter;
-	BodyOrbitRadius.Add(Key, Assigned);
-	return Assigned;
-}
-
-float USingularityAttractComponent::GetSpiralOrbitRadius(AActor* Actor, float BodyAge) const
-{
-	const TWeakObjectPtr<AActor> Key(Actor);
-	const float* Existing = BodyOrbitRadius.Find(Key);
-	const float BaseR = Existing ? *Existing : OrbitRadius;
-
-	const float Duration = FMath::Max(OrbitShrinkDuration, KINDA_SMALL_NUMBER);
-	float Alpha = FMath::Clamp(BodyAge / Duration, 0.f, 1.f);
-	// Slow start, then accelerate into the core.
-	Alpha = FMath::Pow(Alpha, 1.4f);
-
-	return FMath::Lerp(BaseR, OrbitRadiusMin, Alpha);
+	const float HashAlpha = static_cast<float>(GetTypeHash(Actor) % 1000) / 1000.f;
+	const float Jitter = OrbitRadiusJitter * (HashAlpha - 0.5f);
+	BodyOrbitRadius.Add(Key, Jitter);
+	return FMath::Clamp(TargetOrbitRadius + Jitter, MinOrbitRadius, MaxOrbitRadius);
 }
 
 FVector USingularityAttractComponent::ComputeOrbitTangential(const FVector& RadialOut) const
 {
-	const FVector Axis = OrbitAxis.GetSafeNormal();
+	const FVector Axis = GetCurrentOrbitAxis();
 	FVector Tangential = FVector::CrossProduct(Axis, RadialOut);
 	if (!Tangential.Normalize())
 	{
@@ -73,6 +66,25 @@ FVector USingularityAttractComponent::ComputeOrbitTangential(const FVector& Radi
 	return Tangential;
 }
 
+FVector USingularityAttractComponent::GetTangentialDirectionAt(const FVector& BodyWorldPos) const
+{
+	const ASingularity* Singularity = GetSingularity();
+	const FVector Center = Singularity ? Singularity->GetActorLocation() : GetOwner()->GetActorLocation();
+	FVector RadialOut = BodyWorldPos - Center;
+	if (!RadialOut.Normalize())
+	{
+		RadialOut = FVector::ForwardVector;
+	}
+	return ComputeOrbitTangential(RadialOut);
+}
+
+FVector USingularityAttractComponent::GetCurrentOrbitAxis() const
+{
+	const FVector BaseAxis = OrbitAxis.GetSafeNormal(KINDA_SMALL_NUMBER, FVector::UpVector);
+	const FVector TiltAxis = OrbitTiltAxis.GetSafeNormal(KINDA_SMALL_NUMBER, FVector::ForwardVector);
+	return BaseAxis.RotateAngleAxis(CurrentOrbitTiltDegrees, TiltAxis).GetSafeNormal();
+}
+
 void USingularityAttractComponent::ConsumeBody(AActor* Actor, ISuckable* Suckable, ASingularity* Singularity)
 {
 	if (!Actor || !Suckable || !Singularity)
@@ -80,34 +92,89 @@ void USingularityAttractComponent::ConsumeBody(AActor* Actor, ISuckable* Suckabl
 		return;
 	}
 
-	const float Added = Suckable->GetSuckMass();
-	Singularity->AddConsumedMass(Added);
-
-	UE_LOG(LogCollapsePoint, Warning,
-		TEXT("[Attract.Consume] %s AddedMass=%.2f -> CurrentMass=%.2f Gravity=%.2f Visual=%.2f BlackHole=%d"),
-		*GetNameSafe(Actor), Added, Singularity->GetCurrentMass(), GetGravityScale(),
-		Singularity->GetVisualScale(), Singularity->IsBlackHole() ? 1 : 0);
+	UE_LOG(LogCollapsePoint, Warning, TEXT("[Attract.Swallow] %s (timeout famine)"), *GetNameSafe(Actor));
 
 	const TWeakObjectPtr<AActor> Key(Actor);
 	AttractedActors.Remove(Key);
 	BodyOrbitRadius.Remove(Key);
-	BodyCaptureTime.Remove(Key);
-
+	MassContributed.Remove(Key);
 	Actor->Destroy();
+}
+
+void USingularityAttractComponent::SwallowAllOrbiting()
+{
+	ASingularity* Singularity = GetSingularity();
+	TArray<TWeakObjectPtr<AActor>> Copy = AttractedActors;
+	for (const TWeakObjectPtr<AActor>& Weak : Copy)
+	{
+		AActor* Actor = Weak.Get();
+		if (!IsValid(Actor))
+		{
+			continue;
+		}
+		ISuckable* Suckable = Cast<ISuckable>(Actor);
+		ConsumeBody(Actor, Suckable, Singularity);
+	}
+	AttractedActors.Reset();
+	BodyOrbitRadius.Reset();
 }
 
 void USingularityAttractComponent::BeginAttract()
 {
 	bAttracting = true;
+	TargetOrbitRadius = FMath::Clamp(OrbitRadius, MinOrbitRadius, MaxOrbitRadius);
+	CurrentOrbitTiltDegrees = 0.f;
 	AttractedActors.Reset();
 	BodyOrbitRadius.Reset();
-	BodyCaptureTime.Reset();
+	MassContributed.Reset();
 	DebugLogTimer = 0.f;
 	SetComponentTickEnabled(true);
 
 	UE_LOG(LogCollapsePoint, Warning,
-		TEXT("[Attract.Begin.Spiral] CaptureR=%.1f OrbitR=%.1f->Min=%.1f Shrink=%.1fs ConsumeDist=%.1f GravityPerMass=%.2f"),
-		BaseAttractRadius, OrbitRadius, OrbitRadiusMin, OrbitShrinkDuration, ConsumeDistance, GravityPerMass);
+		TEXT("[Attract.Begin.Orbit] CaptureR=%.1f OrbitR=%.1f PlayerPull=%.2f"),
+		BaseAttractRadius, TargetOrbitRadius, PlayerAttractScale);
+}
+
+void USingularityAttractComponent::AdjustOrbitRadius(float InputSteps)
+{
+	if (!bAttracting || FMath::IsNearlyZero(InputSteps))
+	{
+		return;
+	}
+
+	const float Previous = TargetOrbitRadius;
+	TargetOrbitRadius = FMath::Clamp(
+		TargetOrbitRadius + InputSteps * OrbitRadiusStep,
+		MinOrbitRadius,
+		MaxOrbitRadius);
+
+	if (!FMath::IsNearlyEqual(Previous, TargetOrbitRadius))
+	{
+		UE_LOG(LogCollapsePoint, Warning,
+			TEXT("[Attract.Resize] OrbitR %.0f -> %.0f"),
+			Previous, TargetOrbitRadius);
+	}
+}
+
+void USingularityAttractComponent::AdjustOrbitTilt(float InputSteps)
+{
+	if (!bAttracting || FMath::IsNearlyZero(InputSteps))
+	{
+		return;
+	}
+
+	const float Previous = CurrentOrbitTiltDegrees;
+	CurrentOrbitTiltDegrees = FMath::Clamp(
+		CurrentOrbitTiltDegrees + InputSteps * OrbitTiltStepDegrees,
+		0.f,
+		MaxOrbitTiltDegrees);
+
+	if (!FMath::IsNearlyEqual(Previous, CurrentOrbitTiltDegrees))
+	{
+		UE_LOG(LogCollapsePoint, Warning,
+			TEXT("[Attract.Tilt] Plane %.0f -> %.0f degrees"),
+			Previous, CurrentOrbitTiltDegrees);
+	}
 }
 
 void USingularityAttractComponent::StopAttract()
@@ -115,6 +182,68 @@ void USingularityAttractComponent::StopAttract()
 	bAttracting = false;
 	SetComponentTickEnabled(false);
 	UE_LOG(LogCollapsePoint, Warning, TEXT("[Attract.Stop] AttractedCount=%d"), AttractedActors.Num());
+}
+
+void USingularityAttractComponent::PullBreakables(const FVector& Center, float Radius, float DeltaTime) const
+{
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return;
+	}
+
+	for (TActorIterator<ABreakablePanel> It(World); It; ++It)
+	{
+		ABreakablePanel* Panel = *It;
+		if (!Panel || Panel->IsShattered())
+		{
+			continue;
+		}
+		const float Dist = FVector::Dist(Panel->GetActorLocation(), Center);
+		if (Dist <= Radius && !IsPathSuppressed(Center, Panel->GetActorLocation()))
+		{
+			Panel->ApplyWellPull(DeltaTime, Dist);
+		}
+	}
+}
+
+bool USingularityAttractComponent::IsPathSuppressed(const FVector& Start, const FVector& End) const
+{
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return false;
+	}
+
+	for (TActorIterator<ACheckpointVolume> It(World); It; ++It)
+	{
+		if (It->BlocksSingularityPath(Start, End))
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+bool USingularityAttractComponent::IsBlockedByIntactBreakable(
+	const FVector& Start,
+	const UPrimitiveComponent* TargetPrimitive) const
+{
+	UWorld* World = GetWorld();
+	if (!World || !TargetPrimitive)
+	{
+		return false;
+	}
+
+	const FVector End = TargetPrimitive->GetComponentLocation();
+	for (TActorIterator<ABreakablePanel> It(World); It; ++It)
+	{
+		if (It->BlocksAttractionPath(Start, End))
+		{
+			return true;
+		}
+	}
+	return false;
 }
 
 void USingularityAttractComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
@@ -146,18 +275,17 @@ void USingularityAttractComponent::TickComponent(float DeltaTime, ELevelTick Tic
 
 	AttractedActors.RemoveAll([](const TWeakObjectPtr<AActor>& Ptr) { return !Ptr.IsValid(); });
 
+	PullBreakables(Center, CaptureRadius, DeltaTime);
+
 	DebugLogTimer += DeltaTime;
 	const bool bDoLog = DebugLogTimer >= DebugLogInterval;
 	if (bDoLog)
 	{
 		DebugLogTimer = 0.f;
 		UE_LOG(LogCollapsePoint, Warning,
-			TEXT("[Attract.Tick.Spiral] t=%.2f Mass=%.2f Gravity=%.2f CaptureR=%.1f ConsumeDist=%.1f Attracted=%d BlackHole=%d"),
-			Elapsed, Mass, GravityScale, CaptureRadius, ConsumeDistance, AttractedActors.Num(),
-			Singularity->IsBlackHole() ? 1 : 0);
+			TEXT("[Attract.Tick.Orbit] t=%.2f Mass=%.2f Gravity=%.2f CaptureR=%.1f Attracted=%d"),
+			Elapsed, Mass, GravityScale, CaptureRadius, AttractedActors.Num());
 	}
-
-	TArray<AActor*> ToConsume;
 
 	for (TActorIterator<AActor> It(World); It; ++It)
 	{
@@ -187,7 +315,9 @@ void USingularityAttractComponent::TickComponent(float DeltaTime, ELevelTick Tic
 		const FVector BodyLoc = Prim->GetComponentLocation();
 		const FVector FromCenter = BodyLoc - Center;
 		const float Dist = FromCenter.Size();
-		if (Dist > CaptureRadius)
+		if (Dist > CaptureRadius || Dist < KINDA_SMALL_NUMBER
+			|| IsPathSuppressed(Center, BodyLoc)
+			|| IsBlockedByIntactBreakable(Center, Prim))
 		{
 			continue;
 		}
@@ -197,37 +327,26 @@ void USingularityAttractComponent::TickComponent(float DeltaTime, ELevelTick Tic
 		if (bFirstCapture)
 		{
 			AttractedActors.Add(Actor);
-			BodyCaptureTime.Add(Key, 0.f);
 			GetOrAssignOrbitRadius(Actor);
+			if (!MassContributed.Contains(Key))
+			{
+				MassContributed.Add(Key);
+				Singularity->AddConsumedMass(Suckable->GetSuckMass());
+			}
 			UE_LOG(LogCollapsePoint, Warning, TEXT("[Attract.Enter] %s Dist=%.1f"), *GetNameSafe(Actor), Dist);
 		}
 
-		float* AgePtr = BodyCaptureTime.Find(Key);
-		float BodyAge = AgePtr ? *AgePtr : 0.f;
-		BodyAge += DeltaTime;
-		BodyCaptureTime.Add(Key, BodyAge);
-
-		const float ShrinkDuration = FMath::Max(OrbitShrinkDuration, KINDA_SMALL_NUMBER);
-		const float Infall = FMath::Clamp(BodyAge / ShrinkDuration, 0.f, 1.f);
-
-		// Swallow by fixed center distance OR when spiral timer finishes — never by visual mesh size.
-		if (Dist <= ConsumeDistance || BodyAge >= ShrinkDuration || Dist < KINDA_SMALL_NUMBER)
-		{
-			ToConsume.Add(Actor);
-			continue;
-		}
-
-		const float BaseOrbitR = GetOrAssignOrbitRadius(Actor);
-		const float TargetR = GetSpiralOrbitRadius(Actor, BodyAge);
+		const float TargetR = GetOrAssignOrbitRadius(Actor);
 		const FVector RadialOut = FromCenter / Dist;
 		const FVector Tangential = ComputeOrbitTangential(RadialOut);
 		const FVector Vel = Prim->GetPhysicsLinearVelocity();
+		// Light debris whips around quickly; heavy ammunition trades speed for impact.
+		const float BodyMass = FMath::Max(0.f, Suckable->GetSuckMass());
+		const float MassSpeedScale = FMath::Clamp(1.12f - BodyMass * 0.07f, 0.68f, 1.1f);
+		const float DesiredOrbitSpeed = OrbitSpeed * GravityScale * MassSpeedScale;
+		const bool bApproachingOrbit = Dist > TargetR * 1.3f;
 
-		const float SpeedScale = FMath::Clamp(BaseOrbitR / FMath::Max(TargetR, 1.f), 1.f, 2.2f) * GravityScale;
-		// Tangential fades out as the body falls into the core so it looks sucked in, not stuck orbiting.
-		const float DesiredOrbitSpeed = OrbitSpeed * SpeedScale * (1.f - 0.85f * Infall);
-
-		if (bFirstCapture)
+		if (bFirstCapture && !bApproachingOrbit)
 		{
 			const float TangentialNow = FVector::DotProduct(Vel, Tangential);
 			if (TangentialNow < DesiredOrbitSpeed * 0.45f)
@@ -237,14 +356,14 @@ void USingularityAttractComponent::TickComponent(float DeltaTime, ELevelTick Tic
 		}
 
 		const float RadialError = Dist - TargetR;
-		FVector DesiredVel = Tangential * DesiredOrbitSpeed - RadialOut * (RadialError * RadialSpring * GravityScale);
-		DesiredVel += -RadialOut * (DesiredOrbitSpeed * 0.55f * Infall * GravityScale + CapturePullAccel * 0.15f * Infall);
+		const float CompressionControl = FMath::Clamp(OrbitRadius / FMath::Max(TargetR, 1.f), 1.f, 2.5f);
+		const FVector DesiredVel = bApproachingOrbit
+			? -RadialOut * (CaptureApproachSpeed * GravityScale)
+			: Tangential * DesiredOrbitSpeed
+				- RadialOut * (RadialError * RadialSpring * GravityScale * CompressionControl);
 
-		FVector Accel = (DesiredVel - Vel) * (OrbitAlignStrength * GravityScale);
-		if (Dist > FMath::Max(TargetR * 1.25f, ConsumeDistance))
-		{
-			Accel += -RadialOut * (CapturePullAccel * GravityScale);
-		}
+		FVector Accel = (DesiredVel - Vel)
+			* (OrbitAlignStrength * GravityScale * (bApproachingOrbit ? 1.f : CompressionControl));
 
 		if (Accel.SizeSquared() > FMath::Square(MaxOrbitAccel * GravityScale))
 		{
@@ -258,25 +377,7 @@ void USingularityAttractComponent::TickComponent(float DeltaTime, ELevelTick Tic
 		if (NewVel.SizeSquared() > FMath::Square(SpeedCap))
 		{
 			Prim->SetPhysicsLinearVelocity(NewVel.GetSafeNormal() * SpeedCap);
-			NewVel = Prim->GetPhysicsLinearVelocity();
 		}
-
-		if (bDoLog)
-		{
-			UE_LOG(LogCollapsePoint, Warning,
-				TEXT("  [Body] %s Age=%.2f Dist=%.1f TargetR=%.1f ConsumeDist=%.1f Infall=%.2f Vel=%.1f"),
-				*GetNameSafe(Actor), BodyAge, Dist, TargetR, ConsumeDistance, Infall, NewVel.Size());
-		}
-	}
-
-	for (AActor* Actor : ToConsume)
-	{
-		if (!IsValid(Actor))
-		{
-			continue;
-		}
-		ISuckable* Suckable = Cast<ISuckable>(Actor);
-		ConsumeBody(Actor, Suckable, Singularity);
 	}
 
 	if (APawn* Player = UGameplayStatics::GetPlayerPawn(World, 0))
@@ -298,7 +399,8 @@ void USingularityAttractComponent::AttractPlayer(APawn* Player, float Radius, fl
 	const FVector Center = GetOwner()->GetActorLocation();
 	const FVector ToCenter = Center - Player->GetActorLocation();
 	const float Dist = ToCenter.Size();
-	if (Dist > Radius || Dist < KINDA_SMALL_NUMBER)
+	if (Dist > Radius || Dist < KINDA_SMALL_NUMBER
+		|| IsPathSuppressed(Center, Player->GetActorLocation()))
 	{
 		return;
 	}

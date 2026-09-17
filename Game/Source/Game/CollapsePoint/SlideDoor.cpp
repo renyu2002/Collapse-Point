@@ -80,3 +80,15 @@ void ASlideDoor::CloseDoor()
 	}
 	UE_LOG(LogCollapsePoint, Warning, TEXT("[Door.Close] %s"), *GetName());
 }
+
+void ASlideDoor::ResetDoor()
+{
+	bOpen = false;
+	bMoving = false;
+	OpenAlpha = 0.f;
+	if (DoorMesh)
+	{
+		DoorMesh->SetRelativeLocation(ClosedRelativeLocation);
+		DoorMesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+	}
+}

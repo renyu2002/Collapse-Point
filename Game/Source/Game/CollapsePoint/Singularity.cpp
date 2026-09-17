@@ -1,6 +1,7 @@
 #include "CollapsePoint/Singularity.h"
 #include "CollapsePoint/SingularityAttractComponent.h"
 #include "CollapsePoint/SuckableInterface.h"
+#include "CollapsePoint/CollapsePointCharacter.h"
 #include "CollapsePoint/CollapsePointLog.h"
 #include "Components/SphereComponent.h"
 #include "Components/StaticMeshComponent.h"
@@ -70,6 +71,32 @@ void ASingularity::BeginAttract()
 float ASingularity::GetAttractRadius() const
 {
 	return AttractComponent ? AttractComponent->GetCurrentRadius() : 400.f;
+}
+
+float ASingularity::GetOrbitRadius() const
+{
+	return AttractComponent ? AttractComponent->GetCurrentOrbitRadius() : 150.f;
+}
+
+float ASingularity::GetOrbitTilt() const
+{
+	return AttractComponent ? AttractComponent->GetCurrentOrbitTilt() : 0.f;
+}
+
+void ASingularity::AdjustOrbitRadius(float InputSteps)
+{
+	if (!bCollapsed && AttractComponent)
+	{
+		AttractComponent->AdjustOrbitRadius(InputSteps);
+	}
+}
+
+void ASingularity::AdjustOrbitTilt(float InputSteps)
+{
+	if (!bCollapsed && AttractComponent)
+	{
+		AttractComponent->AdjustOrbitTilt(InputSteps);
+	}
 }
 
 float ASingularity::GetVisualScale() const
@@ -142,22 +169,41 @@ void ASingularity::Tick(float DeltaTime)
 	}
 }
 
+void ASingularity::Detonate()
+{
+	// Cascading collapse: eject all captured mass radially, then die. Triggered by a
+	// level-authored overload/detonator so ordinary black-hole gate puzzles are
+	// never disturbed — over-feeding becomes a deliberate omnidirectional launch.
+	UE_LOG(LogCollapsePoint, Error,
+		TEXT("[Singularity.Detonate] Mass=%.2f — radial burst"), CurrentMass);
+	Collapse(FVector::ZeroVector, 0.f, TEXT("OverfeedBurst"), ECollapseLaunch::RadialBurst);
+}
+
 void ASingularity::ForceCollapseByTimeout()
 {
 	UE_LOG(LogCollapsePoint, Error,
-		TEXT("[Singularity.Timeout] Elapsed=%.2f >= MaxLifetime=%.2f Mass=%.2f — auto collapse will fling bodies"),
-		ElapsedTime, MaxLifetime, CurrentMass);
+		TEXT("[Singularity.Timeout] Elapsed=%.2f Mass=%.2f — swallow orbit ammo (famine)"),
+		ElapsedTime, CurrentMass);
 
-	APawn* InstigatorPawn = GetInstigator();
-	FVector AimDir = FVector::ForwardVector;
-	if (InstigatorPawn)
+	if (AttractComponent)
 	{
-		AimDir = InstigatorPawn->GetControlRotation().Vector();
+		AttractComponent->SwallowAllOrbiting();
+		AttractComponent->StopAttract();
 	}
-	Collapse(AimDir, 0.f, TEXT("Timeout"));
+
+	bCollapsed = true;
+	bAttracting = false;
+
+	if (ACollapsePointCharacter* Character = Cast<ACollapsePointCharacter>(GetInstigator()))
+	{
+		Character->OnWellTimeout();
+	}
+
+	OnCollapsed.Broadcast();
+	Destroy();
 }
 
-void ASingularity::Collapse(FVector AimDir, float FlickBoost, const TCHAR* Reason)
+void ASingularity::Collapse(FVector AimDir, float FlickBoost, const TCHAR* Reason, ECollapseLaunch Mode)
 {
 	if (bCollapsed)
 	{
@@ -185,10 +231,14 @@ void ASingularity::Collapse(FVector AimDir, float FlickBoost, const TCHAR* Reaso
 		? AttractComponent->GetAttractedActors()
 		: TArray<TWeakObjectPtr<AActor>>();
 
+	const TCHAR* ModeName =
+		Mode == ECollapseLaunch::TangentialSling ? TEXT("TangentialSling") :
+		Mode == ECollapseLaunch::RadialBurst ? TEXT("RadialBurst") : TEXT("AimThrow");
 	UE_LOG(LogCollapsePoint, Error,
-		TEXT("[Singularity.Collapse] Reason=%s Elapsed=%.2f Mass=%.2f MassForCollapse=%.2f FlickBoost=%.1f Speed=%.1f Aim=(%.2f,%.2f,%.2f) Bodies=%d"),
-		Reason, ElapsedTime, CurrentMass, MassForCollapse, FlickBoost, Speed, AimDir.X, AimDir.Y, AimDir.Z, Attracted.Num());
+		TEXT("[Singularity.Collapse] Reason=%s Mode=%s Elapsed=%.2f Mass=%.2f MassForCollapse=%.2f FlickBoost=%.1f Speed=%.1f Aim=(%.2f,%.2f,%.2f) Bodies=%d"),
+		Reason, ModeName, ElapsedTime, CurrentMass, MassForCollapse, FlickBoost, Speed, AimDir.X, AimDir.Y, AimDir.Z, Attracted.Num());
 
+	const FVector Center = GetActorLocation();
 	for (const TWeakObjectPtr<AActor>& WeakActor : Attracted)
 	{
 		AActor* Actor = WeakActor.Get();
@@ -204,7 +254,50 @@ void ASingularity::Collapse(FVector AimDir, float FlickBoost, const TCHAR* Reaso
 			continue;
 		}
 
+		const FVector BodyPos = Prim->GetComponentLocation();
+
+		if (Mode == ECollapseLaunch::TangentialSling)
+		{
+			// The ring is the sling: keep the body's own travel direction, amplified.
+			// Release phase — not the crosshair — decides where it goes.
+			FVector Vel = Prim->GetPhysicsLinearVelocity();
+			FVector Dir = Vel.GetSafeNormal();
+			if (Dir.IsNearlyZero() && AttractComponent)
+			{
+				Dir = AttractComponent->GetTangentialDirectionAt(BodyPos);
+			}
+			const float SlingSpeed = FMath::Clamp(
+				Vel.Size() * TangentialSlingScale + TangentialSlingBonus,
+				TangentialSlingBonus, MaxCollapseSpeed * 1.6f);
+			UE_LOG(LogCollapsePoint, Warning,
+				TEXT("  [Collapse.Sling] %s VelBefore=%.1f SlingSpeed=%.1f Dir=(%.2f,%.2f,%.2f)"),
+				*GetNameSafe(Actor), Vel.Size(), SlingSpeed, Dir.X, Dir.Y, Dir.Z);
+			Prim->SetPhysicsLinearVelocity(Dir * SlingSpeed);
+			continue;
+		}
+
+		if (Mode == ECollapseLaunch::RadialBurst)
+		{
+			// Over-feed detonation: fling every body straight outward. One collapse
+			// becomes an omnidirectional launch that can feed / trigger everything around.
+			FVector Dir = (BodyPos - Center).GetSafeNormal();
+			if (Dir.IsNearlyZero())
+			{
+				Dir = FMath::VRand();
+			}
+			UE_LOG(LogCollapsePoint, Warning,
+				TEXT("  [Collapse.Burst] %s BurstSpeed=%.1f Dir=(%.2f,%.2f,%.2f)"),
+				*GetNameSafe(Actor), BurstSpeed, Dir.X, Dir.Y, Dir.Z);
+			Prim->SetPhysicsLinearVelocity(Dir * BurstSpeed);
+			continue;
+		}
+
 		FVector ImpulseDir = AimDir;
+		if (FlingConvergenceDistance > KINDA_SMALL_NUMBER)
+		{
+			const FVector ConvergencePoint = Center + AimDir * FlingConvergenceDistance;
+			ImpulseDir = (ConvergencePoint - BodyPos).GetSafeNormal();
+		}
 		if (ScatterAngleDeg > KINDA_SMALL_NUMBER)
 		{
 			ImpulseDir = FMath::VRandCone(AimDir, FMath::DegreesToRadians(ScatterAngleDeg));
@@ -216,6 +309,9 @@ void ASingularity::Collapse(FVector AimDir, float FlickBoost, const TCHAR* Reaso
 			*GetNameSafe(Actor), Prim->GetMass(), Speed, Prim->GetPhysicsLinearVelocity().Size(),
 			ImpulseDir.X, ImpulseDir.Y, ImpulseDir.Z);
 
+		// Release is a crosshair-directed throw. Retain a little orbit character,
+		// but do not let tangential speed overwhelm the player's chosen direction.
+		Prim->SetPhysicsLinearVelocity(Prim->GetPhysicsLinearVelocity() * InheritedOrbitVelocityScale);
 		Prim->AddImpulse(ImpulseDir * Speed, NAME_None, true);
 	}
 

@@ -1,0 +1,12 @@
+==== Build summary [周三022609_105238] ====
+
+Build result: Success
+Build Configuration: Development
+
+[Error and warning statistics]
+Errors: 0
+Warnings: 0
+
+[Full log]
+See: C:\Users\yu.ren02\Documents\GitHub\Collapse-Point\.codebuddy\.UnrealCodeImitator\build_logs\compile_周三022609_105238.log
+

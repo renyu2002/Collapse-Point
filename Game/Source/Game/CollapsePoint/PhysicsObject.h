@@ -23,8 +23,12 @@ public:
 	virtual float GetSuckMass() const override;
 	virtual UPrimitiveComponent* GetSuckPrimitive() const override;
 	virtual void OnSuckedTick(const FVector& Force) override;
+	virtual bool IsBeingSucked() const override;
 
 	float GetDamageScale() const { return DamageScale; }
+	bool IsBroken() const { return bBroken; }
+
+	void ConfigureAsHeavyAmmo();
 
 	/** Snap back to spawn transform and clear velocity. */
 	UFUNCTION(BlueprintCallable, Category = "CollapsePoint")
@@ -50,5 +54,20 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "CollapsePoint")
 	float DamageScale = 1.f;
 
+	/** Prevent a single Chaos contact from applying damage every sub-step. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "CollapsePoint")
+	float ImpactDamageCooldown = 0.65f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "CollapsePoint|Fragile")
+	bool bFragile = false;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "CollapsePoint|Fragile")
+	float FragileBreakScore = 120000.f;
+
 	FTransform SpawnTransform;
+	float LastSuckedWorldTime = -1000.f;
+	TMap<TWeakObjectPtr<AActor>, float> LastImpactDamageTimes;
+	bool bBroken = false;
+
+	void BreakFragile(AActor* HitActor);
 };

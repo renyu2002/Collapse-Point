@@ -26,6 +26,7 @@ public:
 	void CloseDoor();
 
 	bool IsOpen() const { return bOpen; }
+	void ResetDoor();
 
 protected:
 	UPROPERTY(VisibleAnywhere, Category = "CollapsePoint")
